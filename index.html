@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CE2407A Practice Wizard</title>
+<style>
+  :root{
+    --bg:#0b1020; --card:#10172a; --ink:#e6eef8; --muted:#a9b6c8;
+    --accent:#4cc3ff; --accent-2:#00e0a4; --danger:#ff6b6b; --ok:#7dd97d;
+    --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:960px;margin:24px auto;padding:0 16px}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  header h1{font-size:clamp(18px,3.4vw,28px);margin:0;font-weight:700;letter-spacing:.2px}
+  header .meta{font-size:14px;color:var(--muted)}
+  .wizard{background:var(--card);border-radius:14px;box-shadow:0 10px 35px rgba(0,0,0,.35);overflow:hidden}
+  .stepper{display:flex;flex-wrap:wrap;gap:8px;padding:14px;border-bottom:1px solid rgba(255,255,255,.08)}
+  .stepper button{
+    appearance:none;border:0;border-radius:999px;padding:10px 0;width:40px;
+    color:var(--ink);background:#1a2340;cursor:pointer;transition:transform .12s ease, background .2s ease
+  }
+  .stepper button[aria-current="step"]{background:var(--accent);color:#001a2a;font-weight:700}
+  .stepper button.correct{background:var(--accent-2);color:#00251d}
+  .stepper button.incorrect{background:#2a1c1c;color:#ffd6d6}
+  .stepper button:hover{transform:translateY(-1px)}
+  .pane{padding:18px}
+  .q-title{font-size:18px;font-weight:700;margin:4px 0 8px}
+  .q-stem{margin:10px 0 14px;color:var(--ink)}
+  .grid{display:grid;gap:10px}
+  .grid.cols-2{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+  label{display:block;font-weight:600;margin-bottom:6px}
+  input[type="number"], input[type="text"]{
+    width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);
+    background:#0f162c;color:var(--ink);outline:none;box-shadow:none
+  }
+  input:focus{box-shadow:var(--ring);border-color:var(--accent)}
+  .options{display:grid;gap:8px}
+  .opt{background:#0e1528;border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:8px 10px;display:flex;gap:8px;align-items:flex-start}
+  .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .btn{
+    appearance:none;border:0;border-radius:12px;padding:10px 14px;cursor:pointer;color:#001622;background:var(--accent);font-weight:700
+  }
+  .btn.secondary{background:#1a2340;color:var(--ink)}
+  .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,.18);color:var(--ink)}
+  .btn.danger{background:var(--danger);color:#2a0d0d}
+  .feedback{margin-top:10px;padding:10px;border-radius:10px;background:#0e1528;border:1px solid rgba(255,255,255,.08)}
+  .feedback.good{border-color:rgba(0,224,164,.5);background:#0f1f1c}
+  .feedback.bad{border-color:rgba(255,107,107,.5);background:#241515}
+  .solution{margin-top:10px;padding:12px;border-radius:10px;background:#0e1322;border:1px dashed rgba(255,255,255,.15);display:none}
+  .progress{display:flex;justify-content:space-between;gap:16px;padding:12px 14px;background:#0f162c;border-top:1px solid rgba(255,255,255,.08);color:var(--muted)}
+  .kbd{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#091022;border:1px solid rgba(255,255,255,.12);padding:0 6px;border-radius:6px}
+  .muted{color:var(--muted)}
+  .code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+  .tiny{font-size:13px;color:var(--muted)}
+  @media (prefers-reduced-motion:no-preference){.fade-in{animation:fade .25s ease}}
+  @keyframes fade{from{opacity:.25;transform:translateY(6px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>CE2407A Practice </h1>
+    <div class="meta">9 questions • one per screen • instant feedback</div>
+  </header>
+
+  <div class="wizard">
+    <nav class="stepper" id="stepper" aria-label="Question navigator"></nav>
+    <section class="pane fade-in" id="pane"></section>
+    <footer class="progress" id="progress"></footer>
+  </div>
+  <p class="tiny">Tip: Numeric answers accept decimals; tolerance is shown per item. You can jump around with the numbered buttons above.</p>
+</div>
+
+<script>
+"use strict";
+
+/* ---------- Utilities ---------- */
+const $ = (sel, el=document) => el.querySelector(sel);
+const $$ = (sel, el=document) => [...el.querySelectorAll(sel)];
+const fmt = (x, d=5) => Number(x).toFixed(d);
+const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+
+function nearlyEqual(a, b, tol){ return isFinite(a) && Math.abs(a - b) <= tol; }
+
+// Standard normal CDF using Abramowitz–Stegun approximation
+function phi(z){
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = Math.exp(-z*z/2) / Math.sqrt(2*Math.PI);
+  const p = 0.319381530*t - 0.356563782*t**2 + 1.781477937*t**3 - 1.821255978*t**4 + 1.330274429*t**5;
+  const cdf = 1 - d * p;
+  return z >= 0 ? cdf : 1 - cdf;
+}
+
+/* ---------- Question bank ---------- */
+const QUESTIONS = [
+  {
+    id: 1,
+    title: "Total probability (binomial attempts → chance to pass)",
+    type: "numeric",
+    tolerance: 0.0005,
+    fields: [{name: "ppass", label: "Overall P(pass)", placeholder: "e.g., 0.89667"}],
+    stem: `
+      A test has 5 questions. Each question is attempted independently with probability <span class="code">0.9</span>.
+      To be eligible to pass, at least 3 are attempted. The conditional pass chances are:
+      <ul>
+        <li>3 attempted → pass with 0.6</li>
+        <li>4 attempted → pass with 0.8</li>
+        <li>5 attempted → pass with 1.0</li>
+      </ul>
+      <strong>Compute the overall probability of passing</strong>. (Tolerance ±0.0005.)
+    `,
+    answer: ({}) => ({ ppass: 0.89667 }),
+    solution: `
+      Let K ~ Bin(5, 0.9). P(K=3)=10·0.9³·0.1²=0.07290; P(K=4)=5·0.9⁴·0.1=0.32805; P(K=5)=0.9⁵=0.59049.  
+      Then P(pass)=0.6·0.07290 + 0.8·0.32805 + 1.0·0.59049 = <strong>0.89667</strong>.
+    `
+  },
+  {
+    id: 2,
+    title: "Bayes’ rule (given pass, probability attempted 4)",
+    type: "numeric",
+    tolerance: 0.0005,
+    fields: [{name: "p4", label: "P(Attempted 4 | Passed)", placeholder: "e.g., 0.29268"}],
+    stem: `
+      Continue from Q1. Given that the student passed, what is the probability they <em>attempted 4 questions</em>? (±0.0005)
+    `,
+    answer: ({}) => ({ p4: 0.26244 / 0.89667 /* = 0.292683...*/ }),
+    solution: `
+      By Bayes: P(K=4 | pass) = &nbsp;[0.8·P(K=4)] / P(pass) = 0.8·0.32805 / 0.89667 = <strong>0.29268</strong> (rounded).
+    `
+  },
+  {
+    id: 3,
+    title: "Binomial tail",
+    type: "numeric",
+    tolerance: 0.0005,
+    fields: [{name: "p", label: "P(X ≥ 2) for X ~ Bin(n=3, p=0.4)", placeholder: "e.g., 0.35200"}],
+    stem: `
+      Compute the binomial tail: <span class="code">P(X ≥ 2)</span> for <span class="code">X ~ Bin(3, 0.4)</span>. (±0.0005)
+    `,
+    answer: ({}) => ({ p: 0.352 }),
+    solution: `
+      P(X≥2)=P(2)+P(3)=C(3,2)·0.4²·0.6 + C(3,3)·0.4³ = 3·0.16·0.6 + 0.064 = <strong>0.352</strong>.
+    `
+  },
+  {
+    id: 4,
+    title: "Method of Moments for Geometric",
+    type: "numeric",
+    tolerance: 0.0005,
+    fields: [{name: "phat", label: "MoM estimate p̂ (mean of sample is 4.00)", placeholder: "e.g., 0.25"}],
+    stem: `
+      For a Geometric distribution with support 1,2,3,… we have E[X]=1/p.  
+      If the sample mean is <strong>4.00</strong>, estimate <span class="code">p</span> using the Method of Moments. (±0.0005)
+    `,
+    answer: ({}) => ({ phat: 1/4 }),
+    solution: `
+      E[X]=1/p ⇒ p̂ = 1/\\bar x = 1/4.00 = <strong>0.25</strong>.
+    `
+  },
+  {
+    id: 5,
+    title: "χ² goodness‑of‑fit: quick compute",
+    type: "multi-numeric",
+    tolerance: 0.005,
+    fields: [
+      {name: "chi", label: "χ² test statistic", placeholder: "e.g., 1.76"},
+      {name: "df",  label: "Degrees of freedom", placeholder: "e.g., 3"}
+    ],
+    stem: `
+      Observed counts across 4 bins (sum 100): [22, 26, 30, 22].  
+      Expected counts (no parameters estimated) are all 25.  
+      Compute the χ² statistic and the degrees of freedom. (±0.005 for χ²)
+    `,
+    answer: ({}) => ({ chi: (9+1+25+9)/25, df: 3 }), // 44/25 = 1.76
+    solution: `
+      χ²=Σ (O−E)²/E = (22−25)²/25 + (26−25)²/25 + (30−25)²/25 + (22−25)²/25 = (9+1+25+9)/25 = <strong>1.76</strong>.  
+      df = bins − 1 − params = 4 − 1 − 0 = <strong>3</strong>.
+    `
+  },
+  {
+    id: 6,
+    title: "One‑sample t: test statistic & decision",
+    type: "mixed",
+    tolerance: 0.01,
+    fields: [
+      {name: "tval", kind:"number", label: "t statistic (two‑sided test of μ=5)", placeholder:"e.g., 0.82"},
+      {name: "rej",  kind:"mcq", options:["Reject H₀","Do NOT reject H₀"], correctIndex:1, label:"Decision at α=0.05 (df=4, t₀.025,4=2.776)"}
+    ],
+    stem: `
+      Data (n=5): 4.8, 5.1, 5.4, 5.0, 5.2. Assume normal population with unknown σ.  
+      Test H₀: μ=5 vs H₁: μ≠5 at α=0.05. Use critical value <span class="code">t<sub>0.025,4</sub>=2.776</span>.  
+      Enter the t statistic (±0.01) and the decision.
+    `,
+    answer: ({}) => {
+      const xs = [4.8,5.1,5.4,5.0,5.2];
+      const n = xs.length;
+      const mean = xs.reduce((a,b)=>a+b,0)/n; // 5.10
+      const s2 = xs.reduce((a,x)=>a+(x-mean)**2,0)/(n-1); // 0.075
+      const s = Math.sqrt(s2); // 0.27386...
+      const t = (mean - 5) / (s/Math.sqrt(n)); // ≈0.816
+      return { tval: t, rej: 1 };
+    },
+    solution: `
+      \\(\\bar x=5.10\\), \\(s^2=0.075\\Rightarrow s=0.2739\\).  
+      \\(t=\\dfrac{5.10-5}{s/\\sqrt{5}}=0.816\\).  
+      Since |t| = 0.816 &lt; 2.776, <strong>do NOT reject H₀</strong>.
+    `
+  },
+  {
+    id: 7,
+    title: "χ² test on variance (one‑sided)",
+    type: "mixed",
+    tolerance: 0.01,
+    fields: [
+      {name: "chi", kind:"number", label: "χ² statistic", placeholder:"e.g., 7.50"},
+      {name: "rej",  kind:"mcq", options:["Reject H₀","Do NOT reject H₀"], correctIndex:1, label:"Decision at α=0.05 with df=4 (χ²₀.95,4=9.488)"}
+    ],
+    stem: `
+      Using the sample from Q6 (n=5, s²=0.075), test H₀: σ=0.20 vs H₁: σ&gt;0.20 at α=0.05.  
+      df=4 and χ² critical = 9.488. Enter the χ² statistic (±0.01) and the decision.
+    `,
+    answer: ({}) => ({ chi: (5-1)*0.075/(0.20**2), rej: 1 }), // 7.5, do not reject
+    solution: `
+      χ² = (n−1)s²/σ₀² = 4·0.075 / 0.04 = <strong>7.50</strong>.  
+      Since 7.50 &lt; 9.488, <strong>do NOT reject H₀</strong>.
+    `
+  },
+  {
+    id: 8,
+    title: "Simple linear regression & correlation",
+    type: "multi-numeric",
+    tolerance: 0.01,
+    fields: [
+      {name: "b1", label: "Slope b₁", placeholder: "e.g., 0.60"},
+      {name: "r",  label: "Correlation r", placeholder: "e.g., 0.775"}
+    ],
+    stem: `
+      Data (X,Y): (1,2), (2,4), (3,5), (4,4), (5,5).  
+      Compute the regression slope b₁ and the sample correlation r. (±0.01)
+    `,
+    answer: ({}) => ({ b1: 0.6, r: 6/Math.sqrt(60) }), // r ≈ 0.774596...
+    solution: `
+      \\(\\bar x=3\\), \\(\\bar y=4\\).  
+      \\(S_{xx}=10\\), \\(S_{xy}=6\\) ⇒ \\(b_1=S_{xy}/S_{xx}=0.6\\).  
+      \\(S_{yy}=6\\) ⇒ \\(r=S_{xy}/\\sqrt{S_{xx}S_{yy}}=6/\\sqrt{60}=\\mathbf{0.7746}\\).
+    `
+  },
+  {
+    id: 9,
+    title: "Lognormal parameters from mean & COV",
+    type: "multi-numeric",
+    tolerance: 0.0006,
+    fields: [
+      {name: "lambda", label: "λ (to 4 d.p.)", placeholder:"e.g., 4.3389"},
+      {name: "zeta",   label: "ζ (to 4 d.p.)", placeholder:"e.g., 0.2936"}
+    ],
+    stem: `
+      If X is lognormal with mean 80 and coefficient of variation 0.30, find
+      the parameters (λ, ζ) such that ln X ~ N(λ, ζ²).  Use  
+      ζ² = ln(1 + COV²),   λ = ln(mean) − ½ζ². (Tolerance ±0.0006)
+    `,
+    answer: ({}) => {
+      const cov = 0.30, mu = 80;
+      const z2 = Math.log(1 + cov**2);       // 0.0861776962
+      const z  = Math.sqrt(z2);              // 0.293600...
+      const lam= Math.log(mu) - 0.5*z2;      // 4.33893...
+      return { lambda: lam, zeta: z };
+    },
+    solution: `
+      ζ² = ln(1+0.3²)=0.0861777 ⇒ ζ=0.2936.  
+      λ = ln(80) − ½·0.0861777 = <strong>4.3389</strong>.
+    `
+  }
+  ];
+
+/* ---------- State ---------- */
+const State = {
+  idx: 0,
+  // answers: { [qid]: { fieldName: value } }
+  answers: {},
+  // marked: { [qid]: 'correct'|'incorrect'|undefined }
+  marked: {}
+};
+
+/* ---------- Renderers ---------- */
+function renderStepper(){
+  const nav = $("#stepper");
+  nav.innerHTML = "";
+  QUESTIONS.forEach((q, i) => {
+    const b = document.createElement("button");
+    b.textContent = i+1;
+    b.title = `Go to question ${i+1}`;
+    if(State.idx === i) b.setAttribute("aria-current","step");
+    const mark = State.marked[q.id];
+    if(mark === "correct") b.classList.add("correct");
+    if(mark === "incorrect") b.classList.add("incorrect");
+    b.addEventListener("click", () => { State.idx = i; renderAll(); });
+    nav.appendChild(b);
+  });
+}
+
+function renderPane(){
+  const q = QUESTIONS[State.idx];
+  const pane = $("#pane");
+  pane.innerHTML = `
+    <div class="q-title">Q${State.idx+1}. ${q.title}</div>
+    <div class="q-stem">${q.stem}</div>
+    <form id="qform" class="grid ${q.fields.length>1?'cols-2':''}" autocomplete="off"></form>
+    <div class="actions">
+      <button type="button" class="btn" id="check">Check Answer</button>
+      <button type="button" class="btn secondary" id="show">Show solution</button>
+      <button type="button" class="btn ghost" id="prev">◀ Prev</button>
+      <button type="button" class="btn ghost" id="next">Next ▶</button>
+      <button type="button" class="btn danger" id="reset">Reset answer</button>
+    </div>
+    <div id="feedback" class="feedback" style="display:none"></div>
+    <div id="solution" class="solution"></div>
+  `;
+
+  // Build inputs
+  const form = $("#qform");
+  const saved = State.answers[q.id] || {};
+  q.fields.forEach((f, idx) => {
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const id = `f_${q.id}_${idx}`;
+    const lab = document.createElement("label");
+    lab.setAttribute("for", id);
+    lab.textContent = f.label || f.name;
+    wrap.appendChild(lab);
+
+    if(f.kind === "mcq"){
+      const box = document.createElement("div");
+      box.className = "options";
+      f.options.forEach((opt, i) => {
+        const row = document.createElement("label");
+        row.className = "opt";
+        row.innerHTML = `<input type="radio" name="${id}" value="${i}"/> <span>${opt}</span>`;
+        box.appendChild(row);
+      });
+      wrap.appendChild(box);
+    } else {
+      const inp = document.createElement("input");
+      inp.type = f.type || "number";
+      inp.step = "any";
+      inp.inputMode = "decimal";
+      inp.id = id;
+      inp.placeholder = f.placeholder || "";
+      inp.value = saved[f.name] ?? "";
+      wrap.appendChild(inp);
+      if (QUESTIONS[State.idx].type.includes("numeric")) {
+        const tolNote = document.createElement("div");
+        tolNote.className = "tiny muted";
+        const tol = QUESTIONS[State.idx].tolerance ?? 0.001;
+        tolNote.textContent = `Tolerance ±${tol}`;
+        wrap.appendChild(tolNote);
+      }
+    }
+    form.appendChild(wrap);
+  });
+
+  // Hook buttons
+  $("#prev").addEventListener("click", () => { State.idx = clamp(State.idx-1, 0, QUESTIONS.length-1); renderAll(); });
+  $("#next").addEventListener("click", () => { State.idx = clamp(State.idx+1, 0, QUESTIONS.length-1); renderAll(); });
+  $("#reset").addEventListener("click", () => { State.answers[q.id] = {}; State.marked[q.id] = undefined; renderAll(); });
+  $("#check").addEventListener("click", () => checkAnswer(q));
+  $("#show").addEventListener("click", () => {
+    const sol = $("#solution");
+    sol.style.display = sol.style.display === "none" ? "block" : "none";
+  });
+
+  // Fill solution text
+  $("#solution").innerHTML = q.solution;
+}
+
+function renderProgress(){
+  const total = QUESTIONS.length;
+  const done = Object.values(State.marked).filter(Boolean).length;
+  const correct = Object.values(State.marked).filter(x=>x==="correct").length;
+  $("#progress").innerHTML = `
+    <div><strong>Status:</strong> ${done}/${total} checked • <strong>Correct:</strong> ${correct}</div>
+    <div>Use <span class="kbd">Prev</span>/<span class="kbd">Next</span> or click the numbered steps.</div>
+  `;
+}
+
+function renderAll(){ renderStepper(); renderPane(); renderProgress(); }
+
+/* ---------- Checking ---------- */
+function readAnswers(q){
+  const a = {};
+  q.fields.forEach((f, idx) => {
+    const id = `f_${q.id}_${idx}`;
+    if(f.kind === "mcq"){
+      const sel = $$(`input[name="${id}"]:checked`);
+      a[f.name ?? `f${idx}`] = sel.length ? Number(sel[0].value) : null;
+    } else {
+      const inp = document.getElementById(id);
+      a[f.name] = inp.value.trim();
+    }
+  });
+  return a;
+}
+
+function checkAnswer(q){
+  const tol = q.tolerance ?? 0.001;
+  const user = readAnswers(q);
+  State.answers[q.id] = user;
+
+  // compute expected
+  const expected = q.answer(user);
+  let ok = true;
+  let fieldFeedback = [];
+
+  q.fields.forEach((f, i) => {
+    const name = f.name ?? `f${i}`;
+    if(f.kind === "mcq"){
+      const got = user[name];
+      const isOK = (got === f.correctIndex);
+      ok = ok && isOK;
+      fieldFeedback.push(`${f.label || 'Choice'} → ${isOK ? '✔ Correct' : '✖ Incorrect'}`);
+    } else {
+      const got = Number(user[name]);
+      const need = Number(expected[name]);
+      const isOK = nearlyEqual(got, need, tol);
+      ok = ok && isOK;
+      fieldFeedback.push(`${f.label || name}: your ${fmt(got,6)} vs expected ${fmt(need,6)} → ${isOK ? '✔' : '✖'}`);
+    }
+  });
+
+  State.marked[q.id] = ok ? "correct" : "incorrect";
+  renderStepper();
+
+  const fb = $("#feedback");
+  fb.className = "feedback " + (ok ? "good" : "bad");
+  fb.style.display = "block";
+  fb.innerHTML = `<strong>${ok ? "Well done!" : "Not quite."}</strong> ${ok ? "All fields match within tolerance." : "See comparisons:"}
+                  <ul class="tiny"><li>${fieldFeedback.join("</li><li>")}</li></ul>`;
+}
+
+/* ---------- Init ---------- */
+renderAll();
+</script>
+</body>
+</html>
